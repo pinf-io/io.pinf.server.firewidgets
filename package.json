@@ -1,0 +1,23 @@
+{
+  "name": "io.pinf.server.firewidgets",
+  "version": "0.0.0",
+  "private": true,
+  "pm": "npm",
+  "dependencies": {
+    "q": "~1.0.0",
+    "glob": "~3.2.9",
+    "fs-extra": "~0.8.1",
+    "requirejs": "~2.1.11",
+    "send": "~0.2.0",
+    "pio": "~0.6.0",
+    "express": "~3.4.8",
+    "smi.cli": "~0.7.0",
+    "waitfor": "~0.1.3"
+  },
+  "config": {
+    "pio.deploy.converter": {
+  	  "name": "nodejs-lib",
+      "scriptsPath": "scripts.pio"
+    }
+  }
+}
