@@ -18,6 +18,8 @@ define([
 			var domNode = $(this);
 			var uri = config.widgetBaseUri + "/" + domNode.attr(config.tagName) + ".js";
 
+			//console.log("... found widget:", domNode.attr(config.tagName));
+
 			all.push(Q.denodeify(function(callback) {
 				return require([
 					uri
@@ -45,6 +47,10 @@ define([
 
 						self.tag = domNode;
 
+						self.tagConfig = {
+							replace: (domNode.attr(config.tagName + "-replace") === "true")
+						}
+
 						self.server = {
 							attachToStream: function(uri) {
 								var deferred = Q.defer();
@@ -54,6 +60,10 @@ define([
 										url: uri,
 										timeout: 10 * 1000,
 										context: self.tag,
+										crossDomain: true,
+										xhrFields: {
+											withCredentials: true
+										},
 										success: function(response) {
 											var data = null;
 											try {
@@ -94,11 +104,30 @@ define([
 								}
 								var deferred = Q.defer();
 								try {
+									// @source http://stackoverflow.com/a/4825700/330439
+									function getCookie(c_name) {
+									    if (document.cookie.length > 0) {
+									        c_start = document.cookie.indexOf(c_name + "=");
+									        if (c_start != -1) {
+									            c_start = c_start + c_name.length + 1;
+									            c_end = document.cookie.indexOf(";", c_start);
+									            if (c_end == -1) {
+									                c_end = document.cookie.length;
+									            }
+									            return unescape(document.cookie.substring(c_start, c_end));
+									        }
+									    }
+									    return "";
+									}									
 									$.ajax({
 										type: 'GET',
 										url: uri,
 										timeout: 10 * 1000,
 										context: self.tag,
+										crossDomain: true,
+										xhrFields: {
+											withCredentials: true
+										},
 										success: function(response) {
 											return deferred.resolve(response);
 										},
@@ -125,7 +154,11 @@ define([
 
 					var widget = new Widget();
 
-					return Q.timeout(client.call(widget), 10 * 1000).then(function() {
+					return Q.timeout(client.call(widget), 10 * 1000).then(function(_domNode) {
+						if (_domNode) {
+							domNode = _domNode;
+						}
+						//console.log("Scan node for widgets:", uri, domNode.html());
 						return Q.timeout(scan(domNode), 10 * 1000).fail(function(err) {
 							console.error("Widget rendering error:", err.stack);
 							throw err;
