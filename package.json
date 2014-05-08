@@ -16,8 +16,7 @@
   },
   "config": {
     "pio.deploy.converter": {
-  	  "name": "nodejs-lib",
-      "scriptsPath": "scripts.pio"
+  	  "name": "nodejs-server"
     }
   }
 }
