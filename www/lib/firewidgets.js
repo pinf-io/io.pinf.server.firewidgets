@@ -151,13 +151,85 @@ define([
 						EVENTS: EVENTS,
 						DOT: DOT
 					}
+					Widget.prototype.hook = function(_resources, _streams, listeners) {
+						var self = this;
+
+						var resources = {};
+						for (var id in _resources) {
+							resources[id] = self.API.Q.defer();			
+						}
+						function loadResources() {
+							return self.API.Q.all(Object.keys(resources).map(function(id) {
+								return self.server.getResource(_resources[id]).then(function(html) {
+									resources[id].resolve(html);
+									return;
+								}).fail(resources[id].reject);
+							}));
+						}
+
+						var streams = {};
+						for (var id in _streams) {
+							streams[id] = self.API.Q.defer();
+						}
+						function attachToStreams() {
+							return self.API.Q.all(Object.keys(streams).map(function(id) {
+								return self.server.attachToStream(_streams[id]).then(function(stream) {
+									streams[id].resolve(stream);
+									return;
+								}).fail(streams[id].reject);
+							}));
+						}
+
+						function setupListeners() {
+							listeners.forEach(function(listener) {
+								var all = [];
+								if (listener.resources) {
+									listener.resources.forEach(function(resource) {
+										all.push(resources[resource].promise);
+									});
+								}
+								if (listener.streams) {
+									listener.streams.forEach(function(stream) {
+										all.push(streams[stream].promise);
+									});
+								}
+								return self.API.Q.all(all).spread(listener.handler);
+							});
+						}
+
+						return self.API.Q.all([
+							setupListeners(),
+							attachToStreams(),
+							loadResources()
+						]);
+					}
+					Widget.prototype.setHTM = function(htm, data, mode) {
+						var self = this;
+						return self.API.Q.denodeify(function(callback) {
+							var compiled = null;
+							try {
+								compiled = self.API.DOT.template(htm);
+							} catch(err) {
+								console.error("htm", htm);
+								throw new Error("Error compiling htm");
+							}
+							if (typeof mode === "undefined") {
+								mode = self.tagConfig.replace ? "replace": "content";
+							}
+							if (mode === "replace") {
+								self.tag.replaceWith((domNode = $(compiled(data))));
+							} else
+							if (mode === "content") {
+								self.tag.html(compiled(data));
+							} else {
+								throw new Error("Unrecognized render mode '" + mode + "'!");
+							}
+						})();
+					}
 
 					var widget = new Widget();
 
-					return Q.timeout(client.call(widget), 10 * 1000).then(function(_domNode) {
-						if (_domNode) {
-							domNode = _domNode;
-						}
+					return Q.timeout(client.call(widget), 10 * 1000).then(function() {
 						//console.log("Scan node for widgets:", uri, domNode.html());
 						return Q.timeout(scan(domNode), 10 * 1000).fail(function(err) {
 							console.error("Widget rendering error:", err.stack);
