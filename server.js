@@ -30,43 +30,49 @@ exports.main = function(callback) {
 					all.push(pio.locate(serviceId).then(function(serviceLocator) {
 						var config = pio._config["config.plugin"][serviceId];
 						var all = [];
-						Object.keys(config.widgets).forEach(function(group) {
-							var selector = config.widgets[group];
-							if (!Array.isArray(selector)) {
-								selector = [ selector ];
-							}
-							selector.forEach(function(selector) {
-								all.push(Q.denodeify(function(callback) {
-									return GLOB(selector, {
-										cwd: serviceLocator.aspects.source.basePath
-									}, function (err, paths) {
-										if (err) return callback(err);
-										if (paths.length === 0) return callback(null);
+						if (
+							serviceLocator.aspects ||
+							serviceLocator.aspects.source ||
+							serviceLocator.aspects.source.basePath
+						) {
+							Object.keys(config.widgets).forEach(function(group) {
+								var selector = config.widgets[group];
+								if (!Array.isArray(selector)) {
+									selector = [ selector ];
+								}
+								selector.forEach(function(selector) {
+									all.push(Q.denodeify(function(callback) {
+										return GLOB(selector, {
+											cwd: serviceLocator.aspects.source.basePath
+										}, function (err, paths) {
+											if (err) return callback(err);
+											if (paths.length === 0) return callback(null);
 
 
-										if (!_routes[serviceId][group]) {
-											_routes[serviceId][group] = {};
-										}
-										paths.forEach(function(path) {
-											path = PATH.join(serviceLocator.aspects.install.basePath, path);
-
-											var filename = PATH.basename(path);
-											var m = filename.match(/^([a-zA-Z0-9-_\.]+?)(\.json\.service\.js)?$/);
-
-											if (!_routes[serviceId][group][m[1]]) {
-												_routes[serviceId][group][m[1]] = {};
+											if (!_routes[serviceId][group]) {
+												_routes[serviceId][group] = {};
 											}
-											if (m[2]) {
-												_routes[serviceId][group][m[1]].service = path;
-											} else {
-												_routes[serviceId][group][m[1]].widget = path;
-											}
+											paths.forEach(function(path) {
+												path = PATH.join(serviceLocator.aspects.install.basePath, path);
+
+												var filename = PATH.basename(path);
+												var m = filename.match(/^([a-zA-Z0-9-_\.]+?)(\.json\.service\.js)?$/);
+
+												if (!_routes[serviceId][group][m[1]]) {
+													_routes[serviceId][group][m[1]] = {};
+												}
+												if (m[2]) {
+													_routes[serviceId][group][m[1]].service = path;
+												} else {
+													_routes[serviceId][group][m[1]].widget = path;
+												}
+											});
+											return callback(null);
 										});
-										return callback(null);
-									});
-								})());
+									})());
+								});
 							});
-						});
+						}
 						return Q.all(all);
 					}));
 				}
@@ -212,16 +218,24 @@ exports.main = function(callback) {
 
 		console.log("Listening at: http://localhost:" + PORT);
 
-		return mapRoutes().then(function(_routes) {
+		function doMapRoutes() {
+			return mapRoutes().then(function(_routes) {
+				if (JSON.stringify(routes) !== JSON.stringify(_routes)) {
+					console.log("Mapped routes:", JSON.stringify(_routes, null, 4));
+				}
+				routes = _routes;
+			}).fail(function(err) {
+				console.error("Error mapping routes!", err.stack);
+			});
+		}
 
-			routes = _routes;
+		// TODO: Only rescan on reload!
+		setInterval(doMapRoutes, 15 * 1000);
+		doMapRoutes();
 
-			console.log("Mapped routes:", JSON.stringify(routes, null, 4));
-
-		    return callback(null, {
-		        server: server
-		    });
-		}).fail(callback);
+	    return callback(null, {
+	        server: server
+	    });
 	} catch(err) {
 		return callback(err);
 	}
