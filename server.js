@@ -22,7 +22,11 @@ require("io.pinf.server.www").for(module, __dirname, null, function(app) {
 				if (!_routes[serviceId]) {
 					_routes[serviceId] = {};
 				}
+				console.log("Locate widgets for service '" + serviceId + "'");
 				all.push(pio.locate(serviceId).then(function(serviceLocator) {
+					if (!serviceLocator) {
+						return;
+					}
 					var config = pio._config["config.plugin"][serviceId];
 					var all = [];
 					if (
@@ -101,7 +105,7 @@ require("io.pinf.server.www").for(module, __dirname, null, function(app) {
 	    	name = name.replace(/\..+$/, "").split("/")[0];
 	    }
     	if (!routes[serviceId][group]) {
-    		if (routes[serviceId]["__DEFAULT__"][name]) {
+    		if (routes[serviceId]["__DEFAULT__"] && routes[serviceId]["__DEFAULT__"][name]) {
     			group = "__DEFAULT__";
     		} else {
 	    		return callback(new Error("No routes for serviceId '" + serviceId + " and group '" + group + "'!"));
