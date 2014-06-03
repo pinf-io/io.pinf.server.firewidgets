@@ -53,50 +53,86 @@ define([
 
 						self.server = {
 							attachToStream: function(uri) {
-								var deferred = Q.defer();
-								try {
-									$.ajax({
-										type: 'GET',
-										url: uri,
-										timeout: 10 * 1000,
-										context: self.tag,
-										crossDomain: true,
-										xhrFields: {
-											withCredentials: true
-										},
-										success: function(response) {
-											var data = null;
-											try {
-												data = JSON.parse(response);
-											} catch(err) {
-												return deferred.reject("Error parsing data response from uri '" + uri + "':", err.stack);
+								function fetch() {
+									var deferred = Q.defer();
+									try {
+										$.ajax({
+											type: 'GET',
+											url: uri,
+											timeout: 10 * 1000,
+											context: self.tag,
+											crossDomain: true,
+											xhrFields: {
+												withCredentials: true
+											},
+											success: function(response, textStatus, jqXHR) {
+												var data = null;
+												if (typeof response === "string") {
+													try {
+														data = JSON.parse(response);
+													} catch(err) {
+														return deferred.reject("Error parsing data response from uri '" + uri + "':", err.stack);
+													}
+												} else {
+													data = response;
+												}
+												var m = (jqXHR.getResponseHeader("cache-control") || "").match(/max-age=(\d+)/);
+												return deferred.resolve({
+													data: data,
+													maxAge: (m && parseInt(m[1])) || 0
+												});
+											},
+											error: function(xhr, type) {
+												console.error("Error fetching from '" + uri + "'");
+												console.error("xhr", xhr);
+												console.error("type", type);
+												return deferred.reject(new Error("Error fetching from '" + uri + "'"));
 											}
-											var Stream = function(data) {
-												this.data = data;
-											}
-											Stream.prototype = new EVENTS();
-											var stream = new Stream(data);
-
-											// TODO: Look for `update next` timestamp and do new lookup. Notify widget of update via event on stream.
-
-											deferred.resolve(stream);
-
-											setTimeout(function() {
-												stream.emit("changed", data);
-											}, 1);
-											return;
-										},
-										error: function(xhr, type) {
-											console.error("Error fetching from '" + uri + "'");
-											console.error("xhr", xhr);
-											console.error("type", type);
-											return deferred.reject(new Error("Error fetching from '" + uri + "'"));
-										}
-									});
-								} catch(err) {
-									deferred.reject(err);
+										});
+									} catch(err) {
+										deferred.reject(err);
+									}
+									return deferred.promise;
 								}
-								return deferred.promise;
+								return fetch().then(function (response) {
+									var deferred = Q.defer();
+									try {
+										var Stream = function(mode, data) {
+											this.mode = mode;
+											this.data = data;
+										}
+										Stream.prototype = new EVENTS();
+										var stream = null;
+										// Init a stream that fires data events if a cache control
+										// header is found (in which case we refetch after ttl expires)
+										// or a stream that will have its data property set and only one data event fired
+										// right after the data handler has been initialized.
+										if (response.maxAge) {
+											stream = new Stream("multiple", response.data);
+											function fetchAgain() {
+												return fetch().then(function (response) {
+													if (response.maxAge) {
+														setTimeout(fetchAgain, response.maxAge * 1000);
+													}
+													stream.emit("data", response.data);
+													// All done.
+													return;
+												}).fail(function (err) {
+													console.error("Error re-fetching stream '" + uri + "'", err);
+													// Nothing more to do with error.
+													return;
+												});
+											}
+											setTimeout(fetchAgain, response.maxAge * 1000);
+										} else {
+											stream = new Stream("single", response.data);
+										}
+										deferred.resolve(stream);
+									} catch(err) {
+										deferred.reject(err);
+									}										
+									return deferred.promise;
+								});
 							},
 							getResource: function(uri) {
 								if (/^\.\//.test(uri)) {
@@ -163,7 +199,10 @@ define([
 								return self.server.getResource(_resources[id]).then(function(html) {
 									resources[id].resolve(html);
 									return;
-								}).fail(resources[id].reject);
+								}).fail(function(err) {
+									resources[id].reject(err);
+									throw err;
+								});
 							}));
 						}
 
@@ -176,7 +215,10 @@ define([
 								return self.server.attachToStream(_streams[id]).then(function(stream) {
 									streams[id].resolve(stream);
 									return;
-								}).fail(streams[id].reject);
+								}).fail(function(err) {
+									streams[id].reject(err);
+									throw err;
+								});
 							}));
 						}
 
@@ -193,8 +235,28 @@ define([
 										all.push(streams[stream].promise);
 									});
 								}
-								return self.API.Q.all(all).spread(listener.handler);
+								return self.API.Q.all(all).spread(function() {
+									var args = Array.prototype.slice.call(arguments, 0);
+									try {
+										return listener.handler.apply(null, args);
+									} catch(err) {
+										// TODO: Attach context to error.
+										console.error("Handler Error", err);
+										// TODO: Make sure this error propagates!
+										throw err;
+									}
+								}).then(function() {
+									listener.streams.forEach(function(stream) {
+										streams[stream].promise.then(function(stream) {
+											stream.emit("data", stream.data);
+											if (stream.mode === "multiple") {
+												stream.data = null;
+											}
+										});
+									});
+								});
 							});
+							return self.API.Q.resolve();
 						}
 
 						return self.API.Q.all([
@@ -211,7 +273,7 @@ define([
 								compiled = self.API.DOT.template(htm);
 							} catch(err) {
 								console.error("htm", htm);
-								throw new Error("Error compiling htm");
+								return callback(new Error("Error compiling htm"));
 							}
 							if (typeof mode === "undefined") {
 								mode = self.tagConfig.replace ? "replace": "content";
@@ -222,8 +284,9 @@ define([
 							if (mode === "content") {
 								self.tag.html(compiled(data));
 							} else {
-								throw new Error("Unrecognized render mode '" + mode + "'!");
+								return callback(new Error("Unrecognized render mode '" + mode + "'!"));
 							}
+							return callback(null, self.tag);
 						})();
 					}
 
