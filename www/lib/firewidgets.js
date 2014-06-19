@@ -5,11 +5,17 @@ define([
 	"./lib/doT.js",
 ], function(Q, EVENTS, DOT) {
 
+	const DEBUG = false;
+
+	var widgetCounter = 0;
+
 	var config = {
 		tagName: "x-widget"
 	};
 
 	function scan(node) {
+
+		var widgets = [];
 
 		var all = [];
 
@@ -18,7 +24,7 @@ define([
 			var domNode = $(this);
 			var uri = config.widgetBaseUri + "/" + domNode.attr(config.tagName) + ".js";
 
-			//console.log("... found widget:", domNode.attr(config.tagName));
+			if (DEBUG) console.log("... found widget:", domNode.attr(config.tagName));
 
 			all.push(Q.denodeify(function(callback) {
 				return require([
@@ -36,24 +42,26 @@ define([
 					}
 					*/
 
-					var Widget = function() {
+					var Widget = function(domNode) {
 						var self = this;
+
+						self.tag = domNode;
 
 						self.config = config;
 
 						self.widget = {
-							id: domNode.attr(config.tagName)
+							id: self.tag.attr(config.tagName),
+							index: (++ widgetCounter)
 						};
 
-						self.tag = domNode;
-
 						self.tagConfig = {
-							replace: (domNode.attr(config.tagName + "-replace") === "true")
+							replace: (self.tag.attr(config.tagName + "-replace") === "true")
 						}
 
 						self.server = {
 							attachToStream: function(uri) {
 								function fetch() {
+									console.log("Fetch for widget id '", self.widget.id, "' and index '", self.widget.index);
 									var deferred = Q.defer();
 									try {
 										$.ajax({
@@ -110,6 +118,10 @@ define([
 										if (response.maxAge) {
 											stream = new Stream("multiple", response.data);
 											function fetchAgain() {
+												if (!self.tag) {
+													// Tag has been removed so we stop!
+													return;
+												}
 												return fetch().then(function (response) {
 													if (response.maxAge) {
 														setTimeout(fetchAgain, response.maxAge * 1000);
@@ -236,6 +248,10 @@ define([
 									});
 								}
 								return self.API.Q.all(all).spread(function() {
+									if (!self.tag) {
+										// Tag has been removed so we don't handle!
+										return;
+									}
 									var args = Array.prototype.slice.call(arguments, 0);
 									try {
 										return listener.handler.apply(null, args);
@@ -279,7 +295,9 @@ define([
 								mode = self.tagConfig.replace ? "replace": "content";
 							}
 							if (mode === "replace") {
-								self.tag.replaceWith((domNode = $(compiled(data))));
+								// NOTE: Replacing nodes is not so trivial.
+								//       The new tag should be assigned to `self.tag`.
+								throw new Error("Node replacement not yet implemented!");
 							} else
 							if (mode === "content") {
 								self.tag.html(compiled(data));
@@ -289,12 +307,21 @@ define([
 							return callback(null, self.tag);
 						})();
 					}
+					Widget.prototype.destroy = function() {
+						this.tag.html("");
+						this.tag = null;
+						console.log("Destroy widget id '", this.widget.id, "' and index '", this.widget.index);
+					}
 
-					var widget = new Widget();
+					var widget = new Widget(domNode);
+
+					widgets.push(widget);
 
 					return Q.timeout(client.call(widget), 10 * 1000).then(function() {
-						//console.log("Scan node for widgets:", uri, domNode.html());
-						return Q.timeout(scan(domNode), 10 * 1000).fail(function(err) {
+						if (DEBUG) console.log("Scan node for widgets ID:", widget.widget.id);
+						return Q.timeout(scan(widget.tag), 10 * 1000).then(function(subWidgets) {
+							widgets = widgets.concat(subWidgets);
+						}).fail(function(err) {
 							console.error("Widget rendering error:", err.stack);
 							throw err;
 						});						
@@ -305,7 +332,9 @@ define([
 			})());
 		});
 
-		return Q.all(all);
+		return Q.all(all).then(function() {
+			return widgets;
+		});
 	}
 
 	return {
@@ -314,6 +343,12 @@ define([
 			_config.tagName = _config.tagName || config.tagName;
 			config = _config;
 			return scan($("html")).fail(function(err) {
+				console.error("Widget rendering error:", err.stack);
+				throw err;
+			});
+		},
+		scan: function(domNode) {
+			return scan(domNode).fail(function(err) {
 				console.error("Widget rendering error:", err.stack);
 				throw err;
 			});
