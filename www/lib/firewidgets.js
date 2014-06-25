@@ -6,6 +6,7 @@ define([
 ], function(Q, EVENTS, DOT) {
 
 	const DEBUG = false;
+	var API = null;
 
 	var widgetCounter = 0;
 
@@ -13,7 +14,7 @@ define([
 		tagName: "x-widget"
 	};
 
-	function scan(node) {
+	function scan(node, parent) {
 
 		var widgets = [];
 
@@ -42,8 +43,10 @@ define([
 					}
 					*/
 
-					var Widget = function(domNode) {
+					var Widget = function(domNode, parent) {
 						var self = this;
+
+						self.parent = parent || null;
 
 						self.tag = domNode;
 
@@ -57,6 +60,9 @@ define([
 						self.tagConfig = {
 							replace: (self.tag.attr(config.tagName + "-replace") === "true")
 						}
+
+						// Public API that this widget exposes. Specifically usable by parent and child widgets.
+						self.api = {};
 
 						self.server = {
 							attachToStream: function(uri) {
@@ -131,7 +137,8 @@ define([
 													return;
 												}).fail(function (err) {
 													console.error("Error re-fetching stream '" + uri + "'", err);
-													// Nothing more to do with error.
+													// TODO: Back off gradually.
+													setTimeout(fetchAgain, 15 * 1000);
 													return;
 												});
 											}
@@ -194,11 +201,7 @@ define([
 						};
 					}
 					Widget.prototype = new EVENTS();
-					Widget.prototype.API = {
-						Q: Q,
-						EVENTS: EVENTS,
-						DOT: DOT
-					}
+					Widget.prototype.API = API;
 					Widget.prototype.hook = function(_resources, _streams, listeners) {
 						var self = this;
 
@@ -283,6 +286,8 @@ define([
 					}
 					Widget.prototype.setHTM = function(htm, data, mode) {
 						var self = this;
+						data = data || {};
+						data = self.API.DEEPMERGE(data, window.API.config);
 						return self.API.Q.denodeify(function(callback) {
 							var compiled = null;
 							try {
@@ -305,26 +310,33 @@ define([
 								return callback(new Error("Unrecognized render mode '" + mode + "'!"));
 							}
 							return callback(null, self.tag);
-						})();
+						})().then(function (tag) {
+							if (DEBUG) console.log("Scan node for widgets ID:", self.widget.id);
+							if (DEBUG) console.log("HTML:", tag.html());
+							return Q.timeout(scan(tag, self), 10 * 1000).then(function(subWidgets) {
+								widgets = widgets.concat(subWidgets);
+							}).then(function() {
+								return tag;
+							}).fail(function(err) {
+								console.error("Widget rendering error:", err.stack);
+								throw err;
+							});
+						});
 					}
 					Widget.prototype.destroy = function() {
+						this.emit("destroy");
 						this.tag.html("");
 						this.tag = null;
 						console.log("Destroy widget id '", this.widget.id, "' and index '", this.widget.index);
 					}
 
-					var widget = new Widget(domNode);
+					var widget = new Widget(domNode, parent || null);
 
 					widgets.push(widget);
 
-					return Q.timeout(client.call(widget), 10 * 1000).then(function() {
-						if (DEBUG) console.log("Scan node for widgets ID:", widget.widget.id);
-						return Q.timeout(scan(widget.tag), 10 * 1000).then(function(subWidgets) {
-							widgets = widgets.concat(subWidgets);
-						}).fail(function(err) {
-							console.error("Widget rendering error:", err.stack);
-							throw err;
-						});						
+					return Q.timeout(client.call(widget), 10 * 1000).fail(function(err) {
+						console.error("Widget rendering error:", err.stack);
+						throw err;
 					}).then(function() {
 						return callback(null);
 					}).fail(callback);
@@ -337,18 +349,67 @@ define([
 		});
 	}
 
+	function deepmerge (target, src) {
+	    var array = Array.isArray(src);
+	    var dst = array && [] || {};
+
+	    if (array) {
+	        target = target || [];
+	        dst = dst.concat(target);
+	        src.forEach(function(e, i) {
+	            if (typeof dst[i] === 'undefined') {
+	                dst[i] = e;
+	            } else if (typeof e === 'object') {
+	                dst[i] = deepmerge(target[i], e);
+	            } else {
+	                if (target.indexOf(e) === -1) {
+	                    dst.push(e);
+	                }
+	            }
+	        });
+	    } else {
+	        if (target && typeof target === 'object') {
+	            Object.keys(target).forEach(function (key) {
+	                dst[key] = target[key];
+	            })
+	        }
+	        Object.keys(src).forEach(function (key) {
+	            if (typeof src[key] !== 'object' || !src[key]) {
+	                dst[key] = src[key];
+	            }
+	            else {
+	                if (!target[key]) {
+	                    dst[key] = src[key];
+	                } else {
+	                    dst[key] = deepmerge(target[key], src[key]);
+	                }
+	            }
+	        });
+	    }
+
+	    return dst;
+	}
+
 	return {
+		setAPI: function (api) {
+			API = api;
+			API.Q = API.Q || Q;
+			API.EVENTS = API.EVENTS || EVENTS;
+			API.DOT = API.DOT || DOT;
+			API.DEEPMERGE = API.DEEPMERGE || deepmerge;
+		},
 		init: function(_config) {
+			if (!API) throw new Error("Must call setAPI() before calling init()");
 			// TODO: deepmerge `_config` on top of `config`.
 			_config.tagName = _config.tagName || config.tagName;
 			config = _config;
-			return scan($("html")).fail(function(err) {
+			return scan($("html"), null).fail(function(err) {
 				console.error("Widget rendering error:", err.stack);
 				throw err;
 			});
 		},
-		scan: function(domNode) {
-			return scan(domNode).fail(function(err) {
+		scan: function(domNode, parent) {
+			return scan(domNode, parent).fail(function(err) {
 				console.error("Widget rendering error:", err.stack);
 				throw err;
 			});
