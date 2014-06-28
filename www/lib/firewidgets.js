@@ -321,6 +321,10 @@ define([
 								console.error("Widget rendering error:", err.stack);
 								throw err;
 							});
+						}).fail(function(err) {
+							console.log("data", data);
+							console.error("Error rendering widget", err.stack);
+							throw err;
 						});
 					}
 					Widget.prototype.destroy = function() {
