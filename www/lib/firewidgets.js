@@ -57,6 +57,8 @@ define([
 							index: (++ widgetCounter)
 						};
 
+						self.tagContent = self.tag.html();
+
 						self.tagConfig = {
 							replace: (self.tag.attr(config.tagName + "-replace") === "true")
 						}
@@ -338,8 +340,8 @@ define([
 
 					widgets.push(widget);
 
-					return Q.timeout(client.call(widget), 10 * 1000).fail(function(err) {
-						console.error("Widget rendering error:", err.stack);
+					return Q.timeout(client.call(widget), 30 * 1000).fail(function(err) {
+						console.error("Widget rendering error:", err, err.stack);
 						throw err;
 					}).then(function() {
 						return callback(null);
