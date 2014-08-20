@@ -14,15 +14,16 @@ define([
 		tagName: "x-widget"
 	};
 
-	function scan(node, parent) {
+	function scan(node, parent, options) {
+
+		options = options || {};
 
 		var widgets = [];
 
 		var all = [];
 
-		$("[" + config.tagName + "]", node).each(function() {
+		function processNode (domNode) {
 
-			var domNode = $(this);
 			var uri = config.widgetBaseUri + "/" + domNode.attr(config.tagName) + ".js";
 
 			if (DEBUG) console.log("... found widget:", domNode.attr(config.tagName));
@@ -348,6 +349,16 @@ define([
 					}).fail(callback);
 				});
 			})());
+		}
+
+		if (options.scanSelf) {
+			if (node.attr(config.tagName)) {
+				processNode(node);
+			}
+		}
+
+		$("[" + config.tagName + "]", node).each(function() {
+			return processNode($(this));
 		});
 
 		return Q.all(all).then(function() {
@@ -414,8 +425,8 @@ define([
 				throw err;
 			});
 		},
-		scan: function(domNode, parent) {
-			return scan(domNode, parent).fail(function(err) {
+		scan: function(domNode, parent, options) {
+			return scan(domNode, parent, options).fail(function(err) {
 				console.error("Widget rendering error:", err.stack);
 				throw err;
 			});
