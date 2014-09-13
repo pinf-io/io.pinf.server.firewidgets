@@ -50,6 +50,7 @@ define([
 						self.parent = parent || null;
 
 						self.tag = domNode;
+						self.tag[0]._firewidget = this;
 
 						self.config = config;
 
@@ -69,11 +70,11 @@ define([
 
 						self.server = {
 							attachToStream: function(uri) {
-								function fetch() {
+								function fetch (stream) {
 									console.log("Fetch for widget id '", self.widget.id, "' and index '", self.widget.index);
 									var deferred = Q.defer();
 									try {
-										$.ajax({
+										var request = {
 											type: 'GET',
 											url: uri,
 											timeout: 10 * 1000,
@@ -105,7 +106,16 @@ define([
 												console.error("type", type);
 												return deferred.reject(new Error("Error fetching from '" + uri + "'"));
 											}
-										});
+										};
+										if (stream && stream.filter) {
+											console.log("apply filter", stream.filter);
+											request.type = "POST";
+											request.data = JSON.stringify({
+												"filter": stream.filter
+											});
+											request.contentType = "application/json";
+										}
+										$.ajax(request);
 									} catch(err) {
 										deferred.reject(err);
 									}
@@ -117,8 +127,15 @@ define([
 										var Stream = function(mode, data) {
 											this.mode = mode;
 											this.data = data;
+											this.filter = null;
 										}
 										Stream.prototype = new EVENTS();
+										Stream.prototype.setFilter = function(filter) {
+											this.filter = filter;
+											if (this.resubscribe) {
+												return this.resubscribe();
+											}
+										}
 										var stream = null;
 										// Init a stream that fires data events if a cache control
 										// header is found (in which case we refetch after ttl expires)
@@ -126,13 +143,13 @@ define([
 										// right after the data handler has been initialized.
 										if (response.maxAge) {
 											stream = new Stream("multiple", response.data);
-											function fetchAgain() {
+											function fetchAgain(oneTime) {
 												if (!self.tag) {
 													// Tag has been removed so we stop!
-													return;
+													return Q.resolve();
 												}
-												return fetch().then(function (response) {
-													if (response.maxAge) {
+												return fetch(stream).then(function (response) {
+													if (response.maxAge && !oneTime) {
 														setTimeout(fetchAgain, response.maxAge * 1000);
 													}
 													stream.emit("data", response.data);
@@ -140,12 +157,16 @@ define([
 													return;
 												}).fail(function (err) {
 													console.error("Error re-fetching stream '" + uri + "'", err);
+													if (oneTime) throw err;
 													// TODO: Back off gradually.
 													setTimeout(fetchAgain, 15 * 1000);
 													return;
 												});
 											}
 											setTimeout(fetchAgain, response.maxAge * 1000);
+											stream.resubscribe = function () {
+												return fetchAgain(true);
+											}
 										} else {
 											stream = new Stream("single", response.data);
 										}
