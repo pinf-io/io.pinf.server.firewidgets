@@ -154,10 +154,6 @@ require("io.pinf.server.www").for(module, __dirname, null, function(app) {
 
 					console.log("Call service:", path);
 
-					var API = {
-						GLOB: GLOB
-					};
-
 					function eval(path) {
 						try {
 					    	// NOTE: If there are sytnax errors in code this will print
