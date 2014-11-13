@@ -143,6 +143,18 @@ define([
 										// right after the data handler has been initialized.
 										if (response.maxAge) {
 											stream = new Stream("multiple", response.data);
+											function scheduleFetchAgain(maxAge) {
+												var fetchAgainId = setTimeout(function () {
+													fetchAgainId = null;
+													return fetchAgain();
+												}, maxAge * 1000);
+												self.once("destroy", function () {
+													if (!fetchAgainId) return;
+													clearTimeout(fetchAgainId);
+													fetchAgainId = null;
+													console.log("Stopped next scheduled fetch for widget id '", self.widget.id, "' and index '", self.widget.index);
+												});
+											}
 											function fetchAgain(oneTime) {
 												if (!self.tag) {
 													// Tag has been removed so we stop!
@@ -150,7 +162,7 @@ define([
 												}
 												return fetch(stream).then(function (response) {
 													if (response.maxAge && !oneTime) {
-														setTimeout(fetchAgain, response.maxAge * 1000);
+														scheduleFetchAgain(response.maxAge);
 													}
 													stream.emit("data", response.data);
 													// All done.
@@ -163,7 +175,7 @@ define([
 													return;
 												});
 											}
-											setTimeout(fetchAgain, response.maxAge * 1000);
+											scheduleFetchAgain(response.maxAge);
 											stream.resubscribe = function () {
 												return fetchAgain(true);
 											}
@@ -329,7 +341,9 @@ define([
 								throw new Error("Node replacement not yet implemented!");
 							} else
 							if (mode === "content") {
-								self.tag.html(compiled(data));
+								if (self.tag) {
+									self.tag.html(compiled(data));
+								}
 							} else {
 								return callback(new Error("Unrecognized render mode '" + mode + "'!"));
 							}
@@ -352,10 +366,23 @@ define([
 						});
 					}
 					Widget.prototype.destroy = function() {
-						this.emit("destroy");
-						this.tag.html("");
-						this.tag = null;
-						console.log("Destroy widget id '", this.widget.id, "' and index '", this.widget.index);
+						var self = this;
+
+						if (self.tag === null) {
+							// Already destroyed!
+							return;
+						}
+
+						console.log("Destroy widget id '", self.widget.id, "' and index '", self.widget.index);
+						self.tag.html("");
+						self.tag = null;
+						self.emit("destroy");
+
+						console.log("Destroying child widgets", widgets);
+						widgets.forEach(function (widget) {
+							if (widget === self) return;
+							widget.destroy();
+						});
 					}
 
 					var widget = new Widget(domNode, parent || null);
