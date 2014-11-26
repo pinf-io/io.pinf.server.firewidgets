@@ -167,7 +167,11 @@ define([
 													if (response.maxAge && !oneTime) {
 														scheduleFetchAgain(response.maxAge);
 													}
-													stream.emit("data", response.data);
+													try {
+														stream.emit("data", response.data);
+													} catch (err) {
+														console.error("Error while handeling data event:", err.stack);
+													}
 													// All done.
 													return;
 												}).fail(function (err) {
