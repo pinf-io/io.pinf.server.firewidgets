@@ -137,7 +137,7 @@ require("io.pinf.server.www").for(module, __dirname, null, function(app) {
     	});
     });
 
-    app.get(/^\/service\/([^\/]+)(?:\/([^\/]+))?\/(.+)$/, function (req, res, next) {
+    function processServiceRequest (req, res, next) {
     	return ensureRoutes(res, function(err) {
     		if (err) return next(err);
     		return locateRoute(req.params[0], req.params[1], req.params[2], function(err, route) {
@@ -198,7 +198,9 @@ require("io.pinf.server.www").for(module, __dirname, null, function(app) {
     			});
 			});
     	});
-    });
+    };
+    app.get(/^\/service\/([^\/]+)(?:\/([^\/]+))?\/(.+)$/, processServiceRequest);
+    app.post(/^\/service\/([^\/]+)(?:\/([^\/]+))?\/(.+)$/, processServiceRequest);
 
 
 	function doMapRoutes() {
