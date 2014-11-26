@@ -145,15 +145,18 @@ define([
 											stream = new Stream("multiple", response.data);
 											function scheduleFetchAgain(maxAge) {
 												var fetchAgainId = setTimeout(function () {
+													console.log("fetching again after maxAge", maxAge);
+													self.removeListener("destroy", destroyListener);
 													fetchAgainId = null;
 													return fetchAgain();
 												}, maxAge * 1000);
-												self.once("destroy", function () {
+												var destroyListener = function () {
 													if (!fetchAgainId) return;
 													clearTimeout(fetchAgainId);
 													fetchAgainId = null;
 													console.log("Stopped next scheduled fetch for widget id '", self.widget.id, "' and index '", self.widget.index);
-												});
+												};
+												self.once("destroy", destroyListener);
 											}
 											function fetchAgain(oneTime) {
 												if (!self.tag) {
