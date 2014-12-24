@@ -9,7 +9,7 @@ const PIO = require("pio");
 const WAITFOR = require("waitfor");
 const VM = require("vm");
 
-require("io.pinf.server.www").for(module, __dirname, null, function(app) {
+require("io.pinf.server.www").for(module, __dirname, function(app, _config, HELPERS) {
 
 	var routes = null;
 
@@ -137,6 +137,55 @@ require("io.pinf.server.www").for(module, __dirname, null, function(app) {
     	});
     });
 
+    function loadWidget (path, callback) {
+    	if (!loadWidget._widgets) {
+    		loadWidget._widgets = {};
+    	}
+    	// TODO: Optionally disable widget cache (e.g. during dev mode)
+    	if (loadWidget._widgets[path]) {
+			console.log("Re-using widget:", path);
+    		return callback(null, loadWidget._widgets[path]);
+    	}
+		console.log("Loading widget:", path);
+		try {
+	    	// NOTE: If there are sytnax errors in code this will print
+	    	//		 error to stdout (if fourth argument set to `true`).
+	    	//		 There is no way to capture errors from here.
+	    	// @see https://github.com/joyent/node/issues/1307#issuecomment-1551157
+	    	// TODO: Find a better solution to handle errors here.
+	    	// TODO: Capture errors by watching this processe's stdout file log from
+	    	//		 another process.
+	    	var globals = {
+	        	// TODO: Wrap to `console` object provided by `sandboxOptions` and inject module info.
+	        	console: console,
+	        	// NodeJS globals.
+	        	// @see http://nodejs.org/docs/latest/api/globals.html
+	        	global: global,
+	        	process: process,
+	        	Buffer: Buffer,
+	        	setTimeout: setTimeout,
+	        	clearTimeout: clearTimeout,
+	        	setInterval: setInterval,
+	        	clearInterval: clearInterval,
+	        	setImmediate: setImmediate,
+	        	require: require,
+	        	exports: {},
+	        	__dirname: PATH.dirname(path)
+	    	};
+	        VM.runInNewContext(FS.readFileSync(path), globals, path, true);
+
+			if (typeof globals.exports.app !== "function") {
+				return next(new Error("Service '" + path + "' does not export `app` function!"));
+			}
+
+			loadWidget._widgets[path] = globals.exports;
+
+			return callback(null, globals.exports);
+		} catch(err) {
+			return callback(err);
+		}
+    }
+
     function processServiceRequest (req, res, next) {
     	return ensureRoutes(res, function(err) {
     		if (err) return next(err);
@@ -154,47 +203,18 @@ require("io.pinf.server.www").for(module, __dirname, null, function(app) {
 
 					console.log("Call service:", path);
 
-					function eval(path) {
-						try {
-					    	// NOTE: If there are sytnax errors in code this will print
-					    	//		 error to stdout (if fourth argument set to `true`).
-					    	//		 There is no way to capture errors from here.
-					    	// @see https://github.com/joyent/node/issues/1307#issuecomment-1551157
-					    	// TODO: Find a better solution to handle errors here.
-					    	// TODO: Capture errors by watching this processe's stdout file log from
-					    	//		 another process.
-					    	var globals = {
-					        	// TODO: Wrap to `console` object provided by `sandboxOptions` and inject module info.
-					        	console: console,
-					        	// NodeJS globals.
-					        	// @see http://nodejs.org/docs/latest/api/globals.html
-					        	global: global,
-					        	process: process,
-					        	Buffer: Buffer,
-					        	setTimeout: setTimeout,
-					        	clearTimeout: clearTimeout,
-					        	setInterval: setInterval,
-					        	clearInterval: clearInterval,
-					        	setImmediate: setImmediate,
-					        	require: require,
-					        	exports: {},
-					        	__dirname: PATH.dirname(path)
-					    	};
-					        VM.runInNewContext(FS.readFileSync(path), globals, path, true);
+					return loadWidget(path, function (err, exports) {
+						if (err) return next(err);
 
-							if (typeof globals.exports.app !== "function") {
-								return next(new Error("Service '" + path + "' does not export `app` function!"));
-							}
+						// TODO: Use local (service-specific) config for this helper function instead of config from this firewidgets service which is used by `HELPERS.sendEmail`.
+						//var helpers = HELPERS.makeGlobalHelpers(pio);
+						//for (var name in helpers) {
+						//	res[name] = helpers[name];
+						//}
+						res.sendEmail = HELPERS.sendEmail;
 
-							return globals.exports.app(req, res, next);
-
-						} catch(err) {
-							return next(err);
-						}
-					}
-
-					return eval(path);
-
+						return exports.app(req, res, next);
+					});
     			});
 			});
     	});
