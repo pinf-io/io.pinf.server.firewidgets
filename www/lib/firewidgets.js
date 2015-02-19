@@ -281,7 +281,7 @@ define([
 						}
 
 						function setupListeners() {
-							listeners.forEach(function(listener) {
+							return Q.all(listeners.map(function(listener) {
 								var all = [];
 								if (listener.resources) {
 									listener.resources.forEach(function(resource) {
@@ -300,25 +300,29 @@ define([
 									}
 									var args = Array.prototype.slice.call(arguments, 0);
 									try {
-										return listener.handler.apply(null, args);
+										return Q.when(listener.handler.apply(null, args)).fail(function (err) {
+											throw err;
+										});
 									} catch(err) {
 										// TODO: Attach context to error.
-										console.error("Handler Error", err);
+										console.error("Handler Error", err.stack);
 										// TODO: Make sure this error propagates!
-										throw err;
+										return Q.reject(err);
 									}
 								}).then(function() {
-									listener.streams.forEach(function(stream) {
-										streams[stream].promise.then(function(stream) {
+									if (!listener.streams) {
+										return;
+									}
+									return Q.all(listener.streams.map(function(stream) {
+										return streams[stream].promise.then(function(stream) {
 											stream.emit("data", stream.data);
 											if (stream.mode === "multiple") {
 												stream.data = null;
 											}
 										});
-									});
+									}));
 								});
-							});
-							return self.API.Q.resolve();
+							}));
 						}
 
 						return self.API.Q.all([
