@@ -114,6 +114,9 @@ define([
 												"filter": stream.filter
 											});
 											request.contentType = "application/json";
+											request.headers = {
+												"x-pio-proxy-upstream-host": "127.0.0.1:8106"
+											};
 										}
 										$.ajax(request);
 									} catch(err) {
@@ -130,6 +133,29 @@ define([
 											this.filter = null;
 										}
 										Stream.prototype = new EVENTS();
+										Stream.prototype.clone = function() {
+											if (this.mode !== "single") {
+												throw new Error("Only 'single' mode streams may be cloned at this time!");
+											}
+											var stream = new Stream(this.mode, this.data);
+											stream.filter = JSON.parse(JSON.stringify(this.filter));
+											return stream;
+										}
+										Stream.prototype.fetch = function() {
+											var self = this;
+											return fetch(self).then(function (response) {
+												try {
+													self.emit("data", response.data);
+												} catch (err) {
+													console.error("Error while handeling data event:", err.stack);
+												}
+												// All done.
+												return response.data;
+											}).fail(function (err) {
+												console.error("Error fetch stream '" + uri + "'", err);
+												throw err;
+											});
+										}
 										Stream.prototype.setFilter = function(filter) {
 											this.filter = filter;
 											if (this.resubscribe) {
