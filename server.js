@@ -143,8 +143,12 @@ require("io.pinf.server.www").for(module, __dirname, function(app, _config, HELP
     	}
     	// TODO: Optionally disable widget cache (e.g. during dev mode)
     	if (loadWidget._widgets[path]) {
-			console.log("Re-using widget:", path);
-    		return callback(null, loadWidget._widgets[path]);
+    		if (_config.config.cacheWidgets === false) {
+				console.log("SKIP: Re-using widget due to 'cacheWidgets === false':", path);
+    		} else {
+				console.log("Re-using widget:", path);
+	    		return callback(null, loadWidget._widgets[path]);
+    		}
     	}
 		console.log("Loading widget:", path);
 		try {
